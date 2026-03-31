@@ -1,25 +1,12 @@
 import { jsxs, jsx } from "react/jsx-runtime";
 const STORE_URL = "https://obieg-zero-store.gotoreadyai.workers.dev";
-const AUTH_ID = "__store_auth";
+const productsPromise = fetch(`${STORE_URL}/products`).then((r) => r.json()).catch(() => []);
+const stripHtml = (html) => html.replace(/<[^>]*>/g, "");
 const plugin = ({ React, ui, icons, store, sdk }) => {
   const { useState, useEffect, useMemo } = React;
-  const STORE_ID = "__plugin-manager";
-  async function getSaved() {
-    var _a, _b;
-    return ((_b = (_a = await store.get(STORE_ID)) == null ? void 0 : _a.data) == null ? void 0 : _b.specs) ?? [];
-  }
-  async function setSaved(specs) {
-    const existing = await store.get(STORE_ID);
-    if (existing) await store.update(STORE_ID, { specs });
-    else await store.add("meta", { specs }, { id: STORE_ID });
-  }
   function Center() {
     const plugins = sdk.getAllPlugins();
-    const [installed, setInstalled] = useState(() => {
-      var _a;
-      const rec = store.get(STORE_ID);
-      return ((_a = rec == null ? void 0 : rec.data) == null ? void 0 : _a.specs) ?? [];
-    });
+    const [installed, setInstalled] = useState([]);
     const [products, setProducts] = useState([]);
     const [search, setSearch] = useState("");
     const [licensedProducts, setLicensedProducts] = useState(/* @__PURE__ */ new Set());
@@ -27,23 +14,23 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
     const [versionSpec, setVersionSpec] = useState(null);
     const [versions, setVersions] = useState([]);
     const [loadingVersions, setLoadingVersions] = useState(false);
+    const reload = () => sdk.getInstalledPlugins().then(setInstalled);
     useEffect(() => {
-      var _a;
-      const auth = store.get(AUTH_ID);
-      if ((_a = auth == null ? void 0 : auth.data) == null ? void 0 : _a.licenseKey) {
-        sdk.setStoreAuth({ licenseKey: auth.data.licenseKey });
-        fetch(`${STORE_URL}/validate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ licenseKey: auth.data.licenseKey })
-        }).then((r) => r.json()).then((d) => {
-          if (d.productId) setLicensedProducts((prev) => /* @__PURE__ */ new Set([...prev, d.productId]));
-        }).catch(() => {
-        });
-      }
+      reload();
     }, []);
     useEffect(() => {
-      fetch(`${STORE_URL}/products`).then((r) => r.json()).then(setProducts).catch(() => sdk.log("Nie udalo sie pobrac sklepu", "error"));
+      productsPromise.then(setProducts);
+    }, []);
+    useEffect(() => {
+      const auth = sdk.getStoreAuth();
+      if (!(auth == null ? void 0 : auth.licenseKey)) return;
+      fetch(`${STORE_URL}/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ licenseKey: auth.licenseKey })
+      }).then((r) => r.json()).then((d) => {
+        if (d.productId) setLicensedProducts((prev) => /* @__PURE__ */ new Set([...prev, d.productId]));
+      }).catch(() => sdk.log("Nie udalo sie zweryfikowac licencji", "error"));
     }, []);
     useEffect(() => {
       const params = new URLSearchParams(window.location.search);
@@ -51,27 +38,12 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
       const checkoutId = params.get("checkout_id");
       if (!productId || !checkoutId) return;
       window.history.replaceState({}, "", window.location.pathname);
-      saveLicense(checkoutId, productId);
+      sdk.setStoreAuth({ licenseKey: checkoutId });
+      setLicensedProducts((prev) => /* @__PURE__ */ new Set([...prev, productId]));
       setActivating(true);
       installSpec(`store://${productId}`).then(() => sdk.log("Plugin zainstalowany po zakupie", "ok")).catch(() => sdk.log("Blad instalacji po zakupie", "error")).finally(() => setActivating(false));
     }, []);
-    function saveLicense(licenseKey, productId) {
-      const existing = store.get(AUTH_ID);
-      if (existing) store.update(AUTH_ID, { licenseKey });
-      else store.add("meta", { licenseKey }, { id: AUTH_ID });
-      sdk.setStoreAuth({ licenseKey });
-      if (productId) setLicensedProducts((prev) => /* @__PURE__ */ new Set([...prev, productId]));
-    }
-    const installedSpecs = useMemo(() => new Set(installed), [installed]);
-    const myPlugins = useMemo(
-      () => installed.map((spec) => {
-        var _a;
-        const cached = store.get(`__label:${spec}`);
-        const label = ((_a = cached == null ? void 0 : cached.data) == null ? void 0 : _a.label) ?? spec;
-        return { spec, label };
-      }),
-      [installed]
-    );
+    const installedSpecs = useMemo(() => new Set(installed.map((p) => p.spec)), [installed]);
     const filtered = useMemo(() => {
       if (!search.trim() || search.includes("/")) return [];
       const q = search.toLowerCase();
@@ -84,26 +56,18 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
       if (!s) return;
       sdk.useHostStore.setState({ progress: true });
       try {
-        await sdk.loadPlugin(s);
-        const saved = await getSaved();
-        if (!saved.includes(s)) {
-          const next = [...saved, s];
-          await setSaved(next);
-          setInstalled(next);
-          const productId = s.startsWith("store://") ? s.slice(8) : null;
-          const product = productId ? products.find((p) => p.id === productId) : null;
-          const label = (product == null ? void 0 : product.name) ?? s;
-          store.add("meta", { label }, { id: `__label:${s}` });
-        }
+        const productId = s.startsWith("store://") ? s.slice(8) : null;
+        const product = productId ? (await productsPromise).find((p) => p.id === productId) : null;
+        await sdk.installPlugin(s, product == null ? void 0 : product.name);
+        await reload();
         sdk.log("Zainstalowano: " + s, "ok");
       } finally {
         sdk.useHostStore.setState({ progress: false });
       }
     }
     async function uninstallSpec(spec) {
-      const next = (await getSaved()).filter((s) => s !== spec);
-      await setSaved(next);
-      setInstalled(next);
+      await sdk.uninstallPlugin(spec);
+      await reload();
       sdk.log("Odinstalowano — przeladuj strone aby zakonczyc", "ok");
     }
     async function fetchVersions(spec) {
@@ -122,63 +86,41 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
       }
     }
     async function changeVersion(oldSpec, tag) {
-      const repo = oldSpec.split("@")[0];
-      const newSpec = `${repo}@${tag}`;
-      const saved = await getSaved();
-      const next = saved.map((s) => s === oldSpec ? newSpec : s);
-      await setSaved(next);
-      setInstalled(next);
-      const oldLabel = store.get(`__label:${oldSpec}`);
-      if (oldLabel) {
-        store.add("meta", { label: oldLabel.data.label }, { id: `__label:${newSpec}` });
-        store.remove(`__label:${oldSpec}`);
-      }
+      const newSpec = `${oldSpec.split("@")[0]}@${tag}`;
+      await sdk.uninstallPlugin(oldSpec);
+      await sdk.installPlugin(newSpec);
+      await reload();
       setVersionSpec(null);
       sdk.log(`Zmieniono na ${newSpec} — przeladuj strone`, "ok");
     }
-    function stripHtml(html) {
-      const div = document.createElement("div");
-      div.innerHTML = html;
-      return div.textContent ?? "";
-    }
     async function buyPlugin(p) {
-      const successUrl = window.location.origin + window.location.pathname;
       try {
         const res = await fetch(`${STORE_URL}/checkout`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ productId: p.id, successUrl })
+          body: JSON.stringify({ productId: p.id, successUrl: window.location.origin + window.location.pathname })
         });
         const data = await res.json();
-        if (data.checkoutUrl) {
-          window.location.href = data.checkoutUrl;
-        } else {
-          sdk.log(data.error || "Blad tworzenia platnosci", "error");
-        }
+        if (data.checkoutUrl) window.location.href = data.checkoutUrl;
+        else sdk.log(data.error || "Blad tworzenia platnosci", "error");
       } catch {
         sdk.log("Blad polaczenia ze sklepem", "error");
       }
     }
     function pluginAction(p) {
       const spec = `store://${p.id}`;
-      const isInstalled = installed.includes(spec);
+      const isInstalled = installedSpecs.has(spec);
       const isLoaded = plugins.some((pl) => pl.id === p.pluginId);
-      if (isInstalled || isLoaded) {
-        return /* @__PURE__ */ jsxs(ui.Row, { children: [
-          licensedProducts.has(p.id) && /* @__PURE__ */ jsx(ui.Badge, { color: "success", children: "Licencja" }),
-          /* @__PURE__ */ jsx(ui.Badge, { children: "Zainstalowany" }),
-          isInstalled && /* @__PURE__ */ jsx(ui.Button, { color: "error", size: "xs", outline: true, onClick: () => uninstallSpec(spec), children: "Odinstaluj" })
-        ] });
-      }
-      if (licensedProducts.has(p.id)) {
-        return /* @__PURE__ */ jsxs(ui.Row, { children: [
-          /* @__PURE__ */ jsx(ui.Badge, { color: "success", children: "Licencja" }),
-          /* @__PURE__ */ jsx(ui.Button, { size: "xs", onClick: () => installSpec(spec), children: "Dodaj" })
-        ] });
-      }
-      if (p.price === 0) {
-        return /* @__PURE__ */ jsx(ui.Button, { size: "xs", onClick: () => installSpec(spec), children: "Dodaj" });
-      }
+      if (isInstalled || isLoaded) return /* @__PURE__ */ jsxs(ui.Row, { children: [
+        licensedProducts.has(p.id) && /* @__PURE__ */ jsx(ui.Badge, { color: "success", children: "Licencja" }),
+        /* @__PURE__ */ jsx(ui.Badge, { children: "Zainstalowany" }),
+        isInstalled && /* @__PURE__ */ jsx(ui.Button, { color: "error", size: "xs", outline: true, onClick: () => uninstallSpec(spec), children: "Odinstaluj" })
+      ] });
+      if (licensedProducts.has(p.id)) return /* @__PURE__ */ jsxs(ui.Row, { children: [
+        /* @__PURE__ */ jsx(ui.Badge, { color: "success", children: "Licencja" }),
+        /* @__PURE__ */ jsx(ui.Button, { size: "xs", onClick: () => installSpec(spec), children: "Dodaj" })
+      ] });
+      if (p.price === 0) return /* @__PURE__ */ jsx(ui.Button, { size: "xs", onClick: () => installSpec(spec), children: "Dodaj" });
       return /* @__PURE__ */ jsxs(ui.Button, { size: "xs", onClick: () => buyPlugin(p), children: [
         "Kup ",
         p.priceFormatted
@@ -200,21 +142,23 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
           ),
           search.includes("/") && /* @__PURE__ */ jsx(ui.Button, { onClick: () => installSpec(search), children: "Zainstaluj" })
         ] }),
-        /* @__PURE__ */ jsx(ui.Stack, { children: filtered.map((p) => /* @__PURE__ */ jsx(React.Fragment, { children: /* @__PURE__ */ jsx(
-          ui.ListItem,
-          {
-            label: p.name,
-            detail: stripHtml(p.description) + (p.price > 0 ? " · " + p.priceFormatted : " · Darmowy"),
-            action: pluginAction(p)
-          }
-        ) }, p.id)) })
+        /* @__PURE__ */ jsx(ui.Stack, { children: filtered.map(
+          (p) => /* @__PURE__ */ jsx(
+            ui.ListItem,
+            {
+              label: p.name,
+              detail: stripHtml(p.description) + (p.price > 0 ? " · " + p.priceFormatted : " · Darmowy"),
+              action: pluginAction(p)
+            },
+            p.id
+          )
+        ) })
       ] }),
-      myPlugins.length > 0 && /* @__PURE__ */ jsx(ui.Card, { title: "Zainstalowane pluginy", children: /* @__PURE__ */ jsx(ui.Stack, { children: myPlugins.map((p) => {
+      installed.length > 0 && /* @__PURE__ */ jsx(ui.Card, { title: "Zainstalowane pluginy", children: /* @__PURE__ */ jsx(ui.Stack, { children: installed.map((p) => {
         const isGh = p.spec.includes("/") && !p.spec.startsWith("store://");
-        const currentRef = p.spec.split("@")[1] ?? "main";
-        const pluginDef = plugins.find((pl) => p.label === pl.label || p.spec.includes(pl.id));
+        const pluginDef = plugins.find((pl) => pl.id === p.spec.replace(/^store:\/\//, "").split("@")[0].split("/").pop());
         const ver = pluginDef == null ? void 0 : pluginDef.version;
-        const detail = [ver && `v${ver}`, isGh && currentRef].filter(Boolean).join(" · ");
+        const detail = [ver && `v${ver}`, isGh && (p.spec.split("@")[1] ?? "main")].filter(Boolean).join(" · ");
         return /* @__PURE__ */ jsxs(React.Fragment, { children: [
           /* @__PURE__ */ jsx(
             ui.ListItem,
@@ -238,41 +182,23 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
   }
   function Footer() {
     const tofu = store.usePosts("_integrity");
-    return /* @__PURE__ */ jsxs(ui.Button, { size: "xs", color: "warning", outline: true, onClick: async () => {
-      let count = 0;
-      for (const p of tofu) {
-        try {
-          await store.remove(p.id);
-          count++;
-        } catch {
-        }
-      }
-      sdk.log(`Wyczyszczono TOFU (${count}) — przeladuj strone`, "ok");
+    return /* @__PURE__ */ jsxs(ui.Button, { size: "xs", color: "warning", outline: true, onClick: () => {
+      for (const p of tofu) store.remove(p.id);
+      sdk.log(`Wyczyszczono TOFU (${tofu.length}) — przeladuj strone`, "ok");
     }, children: [
       "Resetuj TOFU (",
       tofu.length,
       ")"
     ] });
   }
-  function setup() {
-    var _a;
-    const auth = store.get(AUTH_ID);
-    if ((_a = auth == null ? void 0 : auth.data) == null ? void 0 : _a.licenseKey) {
-      sdk.setStoreAuth({ licenseKey: auth.data.licenseKey });
-    }
-    getSaved().then((specs) => {
-      for (const s of specs) sdk.loadPlugin(s);
-    });
-  }
   sdk.registerView("manager.center", { slot: "center", component: Center });
   sdk.registerView("manager.footer", { slot: "footer", component: Footer });
   return {
     id: "plugin-manager",
     label: "Pluginy",
-    version: "0.5.0",
+    version: "0.7.0",
     description: "Sklep pluginow",
-    icon: icons.Package,
-    setup
+    icon: icons.Package
   };
 };
 export {
