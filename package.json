@@ -1,6 +1,6 @@
 {
   "name": "@obieg-zero/plugin-manager",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Instalacja i zarządzanie pluginami",
   "price": 1000,
   "private": true

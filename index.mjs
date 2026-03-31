@@ -180,14 +180,7 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
       }) }) })
     ] });
   }
-  function Footer() {
-    return /* @__PURE__ */ jsx(ui.Button, { size: "xs", color: "warning", outline: true, onClick: async () => {
-      const count = await sdk.resetTofu();
-      sdk.log(`Wyczyszczono TOFU (${count}) — przeladuj strone`, "ok");
-    }, children: "Resetuj TOFU" });
-  }
   sdk.registerView("manager.center", { slot: "center", component: Center });
-  sdk.registerView("manager.footer", { slot: "footer", component: Footer });
   return {
     id: "plugin-manager",
     label: "Pluginy",
