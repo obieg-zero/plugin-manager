@@ -46,35 +46,13 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
       fetch(`${STORE_URL}/products`).then((r) => r.json()).then(setProducts).catch(() => sdk.log("Nie udalo sie pobrac sklepu", "error"));
     }, []);
     useEffect(() => {
-      var _a, _b;
-      const pendingEmail = (_b = (_a = store.get("__pending_purchase")) == null ? void 0 : _a.data) == null ? void 0 : _b.email;
-      if (!pendingEmail) return;
-      store.remove("__pending_purchase");
+      const params = new URLSearchParams(window.location.search);
+      const productId = params.get("product_id");
+      if (!productId) return;
+      window.history.replaceState({}, "", window.location.pathname);
       setActivating(true);
-      fetch(`${STORE_URL}/activate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: pendingEmail })
-      }).then((r) => r.json()).then(async (data) => {
-        if (data.error) {
-          sdk.log(data.error, "error");
-          return;
-        }
-        const keys = Array.isArray(data) ? data : [];
-        for (const k of keys) {
-          saveLicense(k.licenseKey, k.productId);
-          await installSpec(`store://${k.productId}`);
-        }
-        if (keys.length) sdk.log("Zakup aktywowany", "ok");
-      }).catch(() => sdk.log("Blad aktywacji zakupu", "error")).finally(() => setActivating(false));
+      installSpec(`store://${productId}`).then(() => sdk.log("Plugin zainstalowany po zakupie", "ok")).catch(() => sdk.log("Blad instalacji po zakupie", "error")).finally(() => setActivating(false));
     }, []);
-    function saveLicense(licenseKey, productId) {
-      const existing = store.get(AUTH_ID);
-      if (existing) store.update(AUTH_ID, { licenseKey });
-      else store.add("meta", { licenseKey }, { id: AUTH_ID });
-      sdk.setStoreAuth({ licenseKey });
-      if (productId) setLicensedProducts((prev) => /* @__PURE__ */ new Set([...prev, productId]));
-    }
     const installedSpecs = useMemo(() => new Set(installed), [installed]);
     const myPlugins = useMemo(
       () => installed.map((spec) => {
