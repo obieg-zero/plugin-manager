@@ -48,11 +48,20 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
     useEffect(() => {
       const params = new URLSearchParams(window.location.search);
       const productId = params.get("product_id");
-      if (!productId) return;
+      const checkoutId = params.get("checkout_id");
+      if (!productId || !checkoutId) return;
       window.history.replaceState({}, "", window.location.pathname);
+      saveLicense(checkoutId, productId);
       setActivating(true);
       installSpec(`store://${productId}`).then(() => sdk.log("Plugin zainstalowany po zakupie", "ok")).catch(() => sdk.log("Blad instalacji po zakupie", "error")).finally(() => setActivating(false));
     }, []);
+    function saveLicense(licenseKey, productId) {
+      const existing = store.get(AUTH_ID);
+      if (existing) store.update(AUTH_ID, { licenseKey });
+      else store.add("meta", { licenseKey }, { id: AUTH_ID });
+      sdk.setStoreAuth({ licenseKey });
+      if (productId) setLicensedProducts((prev) => /* @__PURE__ */ new Set([...prev, productId]));
+    }
     const installedSpecs = useMemo(() => new Set(installed), [installed]);
     const myPlugins = useMemo(
       () => installed.map((spec) => {
