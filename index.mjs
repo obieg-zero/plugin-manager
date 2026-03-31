@@ -24,8 +24,6 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
     const [search, setSearch] = useState("");
     const [licensedProducts, setLicensedProducts] = useState(/* @__PURE__ */ new Set());
     const [activating, setActivating] = useState(false);
-    const [buyingId, setBuyingId] = useState(null);
-    const [buyEmail, setBuyEmail] = useState("");
     const [versionSpec, setVersionSpec] = useState(null);
     const [versions, setVersions] = useState([]);
     const [loadingVersions, setLoadingVersions] = useState(false);
@@ -156,16 +154,13 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
       div.innerHTML = html;
       return div.textContent ?? "";
     }
-    async function buyPlugin(p, email) {
-      const existing = store.get("__pending_purchase");
-      if (existing) store.update("__pending_purchase", { email });
-      else store.add("meta", { email }, { id: "__pending_purchase" });
+    async function buyPlugin(p) {
       const successUrl = window.location.origin + window.location.pathname;
       try {
         const res = await fetch(`${STORE_URL}/checkout`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ productId: p.id, successUrl, email })
+          body: JSON.stringify({ productId: p.id, successUrl })
         });
         const data = await res.json();
         if (data.checkoutUrl) {
@@ -197,7 +192,7 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
       if (p.price === 0) {
         return /* @__PURE__ */ jsx(ui.Button, { size: "xs", onClick: () => installSpec(spec), children: "Dodaj" });
       }
-      return /* @__PURE__ */ jsxs(ui.Button, { size: "xs", onClick: () => setBuyingId(p.id), children: [
+      return /* @__PURE__ */ jsxs(ui.Button, { size: "xs", onClick: () => buyPlugin(p), children: [
         "Kup ",
         p.priceFormatted
       ] });
@@ -218,30 +213,14 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
           ),
           search.includes("/") && /* @__PURE__ */ jsx(ui.Button, { onClick: () => installSpec(search), children: "Zainstaluj" })
         ] }),
-        /* @__PURE__ */ jsx(ui.Stack, { children: filtered.map((p) => /* @__PURE__ */ jsxs(React.Fragment, { children: [
-          /* @__PURE__ */ jsx(
-            ui.ListItem,
-            {
-              label: p.name,
-              detail: stripHtml(p.description) + (p.price > 0 ? " · " + p.priceFormatted : " · Darmowy"),
-              action: pluginAction(p)
-            }
-          ),
-          buyingId === p.id && /* @__PURE__ */ jsxs(ui.Row, { children: [
-            /* @__PURE__ */ jsx(
-              ui.Input,
-              {
-                placeholder: "Twoj email",
-                value: buyEmail,
-                onChange: (e) => setBuyEmail(e.target.value),
-                onKeyDown: (e) => {
-                  if (e.key === "Enter" && buyEmail.includes("@")) buyPlugin(p, buyEmail);
-                }
-              }
-            ),
-            /* @__PURE__ */ jsx(ui.Button, { onClick: () => buyPlugin(p, buyEmail), disabled: !buyEmail.includes("@"), children: "Przejdz do platnosci" })
-          ] })
-        ] }, p.id)) })
+        /* @__PURE__ */ jsx(ui.Stack, { children: filtered.map((p) => /* @__PURE__ */ jsx(React.Fragment, { children: /* @__PURE__ */ jsx(
+          ui.ListItem,
+          {
+            label: p.name,
+            detail: stripHtml(p.description) + (p.price > 0 ? " · " + p.priceFormatted : " · Darmowy"),
+            action: pluginAction(p)
+          }
+        ) }, p.id)) })
       ] }),
       myPlugins.length > 0 && /* @__PURE__ */ jsx(ui.Card, { title: "Zainstalowane pluginy", children: /* @__PURE__ */ jsx(ui.Stack, { children: myPlugins.map((p) => {
         const isGh = p.spec.includes("/") && !p.spec.startsWith("store://");
