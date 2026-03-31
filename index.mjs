@@ -181,15 +181,10 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
     ] });
   }
   function Footer() {
-    const tofu = store.usePosts("_integrity");
-    return /* @__PURE__ */ jsxs(ui.Button, { size: "xs", color: "warning", outline: true, onClick: () => {
-      for (const p of tofu) store.remove(p.id);
-      sdk.log(`Wyczyszczono TOFU (${tofu.length}) — przeladuj strone`, "ok");
-    }, children: [
-      "Resetuj TOFU (",
-      tofu.length,
-      ")"
-    ] });
+    return /* @__PURE__ */ jsx(ui.Button, { size: "xs", color: "warning", outline: true, onClick: async () => {
+      const count = await sdk.resetTofu();
+      sdk.log(`Wyczyszczono TOFU (${count}) — przeladuj strone`, "ok");
+    }, children: "Resetuj TOFU" });
   }
   sdk.registerView("manager.center", { slot: "center", component: Center });
   sdk.registerView("manager.footer", { slot: "footer", component: Footer });
