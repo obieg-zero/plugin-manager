@@ -22,7 +22,7 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
     });
     const [products, setProducts] = useState([]);
     const [search, setSearch] = useState("");
-    const [hasLicense, setHasLicense] = useState(false);
+    const [licensedProducts, setLicensedProducts] = useState(/* @__PURE__ */ new Set());
     const [activating, setActivating] = useState(false);
     const [buyingId, setBuyingId] = useState(null);
     const [buyEmail, setBuyEmail] = useState("");
@@ -33,8 +33,15 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
       var _a;
       const auth = store.get(AUTH_ID);
       if ((_a = auth == null ? void 0 : auth.data) == null ? void 0 : _a.licenseKey) {
-        setHasLicense(true);
         sdk.setStoreAuth({ licenseKey: auth.data.licenseKey });
+        fetch(`${STORE_URL}/validate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ licenseKey: auth.data.licenseKey })
+        }).then((r) => r.json()).then((d) => {
+          if (d.productId) setLicensedProducts((prev) => /* @__PURE__ */ new Set([...prev, d.productId]));
+        }).catch(() => {
+        });
       }
     }, []);
     useEffect(() => {
@@ -57,25 +64,20 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
         }
         const keys = Array.isArray(data) ? data : [];
         for (const k of keys) {
-          saveLicense(k.licenseKey);
+          saveLicense(k.licenseKey, k.productId);
           await installSpec(`store://${k.productId}`);
         }
         if (keys.length) sdk.log("Zakup aktywowany", "ok");
       }).catch(() => sdk.log("Blad aktywacji zakupu", "error")).finally(() => setActivating(false));
     }, []);
-    function saveLicense(licenseKey) {
+    function saveLicense(licenseKey, productId) {
       const existing = store.get(AUTH_ID);
       if (existing) store.update(AUTH_ID, { licenseKey });
       else store.add("meta", { licenseKey }, { id: AUTH_ID });
       sdk.setStoreAuth({ licenseKey });
-      setHasLicense(true);
+      if (productId) setLicensedProducts((prev) => /* @__PURE__ */ new Set([...prev, productId]));
     }
-    useMemo(() => new Set(plugins.map((p) => p.id)), [plugins]);
     const installedSpecs = useMemo(() => new Set(installed), [installed]);
-    useMemo(
-      () => installed.filter((s) => s.startsWith("store://")),
-      [installed]
-    );
     const myPlugins = useMemo(
       () => installed.map((spec) => {
         var _a;
@@ -154,20 +156,45 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
       div.innerHTML = html;
       return div.textContent ?? "";
     }
-    function buyPlugin(p, email) {
+    async function buyPlugin(p, email) {
       const existing = store.get("__pending_purchase");
       if (existing) store.update("__pending_purchase", { email });
       else store.add("meta", { email }, { id: "__pending_purchase" });
-      const returnUrl = encodeURIComponent(window.location.origin + window.location.pathname);
-      window.location.href = p.buyUrl + "?checkout[custom][redirect_url]=" + returnUrl + "&checkout[email]=" + encodeURIComponent(email);
+      const successUrl = window.location.origin + window.location.pathname;
+      try {
+        const res = await fetch(`${STORE_URL}/checkout`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ productId: p.id, successUrl, email })
+        });
+        const data = await res.json();
+        if (data.checkoutUrl) {
+          window.location.href = data.checkoutUrl;
+        } else {
+          sdk.log(data.error || "Blad tworzenia platnosci", "error");
+        }
+      } catch {
+        sdk.log("Blad polaczenia ze sklepem", "error");
+      }
     }
     function pluginAction(p) {
       const spec = `store://${p.id}`;
       const isInstalled = installed.includes(spec);
-      if (isInstalled) {
-        return /* @__PURE__ */ jsx(ui.Button, { color: "error", size: "xs", outline: true, onClick: () => uninstallSpec(spec), children: "Odinstaluj" });
+      const isLoaded = plugins.some((pl) => pl.id === p.pluginId);
+      if (isInstalled || isLoaded) {
+        return /* @__PURE__ */ jsxs(ui.Row, { children: [
+          licensedProducts.has(p.id) && /* @__PURE__ */ jsx(ui.Badge, { color: "success", children: "Licencja" }),
+          /* @__PURE__ */ jsx(ui.Badge, { children: "Zainstalowany" }),
+          isInstalled && /* @__PURE__ */ jsx(ui.Button, { color: "error", size: "xs", outline: true, onClick: () => uninstallSpec(spec), children: "Odinstaluj" })
+        ] });
       }
-      if (p.price === 0 || hasLicense) {
+      if (licensedProducts.has(p.id)) {
+        return /* @__PURE__ */ jsxs(ui.Row, { children: [
+          /* @__PURE__ */ jsx(ui.Badge, { color: "success", children: "Licencja" }),
+          /* @__PURE__ */ jsx(ui.Button, { size: "xs", onClick: () => installSpec(spec), children: "Dodaj" })
+        ] });
+      }
+      if (p.price === 0) {
         return /* @__PURE__ */ jsx(ui.Button, { size: "xs", onClick: () => installSpec(spec), children: "Dodaj" });
       }
       return /* @__PURE__ */ jsxs(ui.Button, { size: "xs", onClick: () => setBuyingId(p.id), children: [
@@ -271,7 +298,7 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
   sdk.registerView("manager.center", { slot: "center", component: Center });
   sdk.registerView("manager.footer", { slot: "footer", component: Footer });
   return {
-    id: "manager",
+    id: "plugin-manager",
     label: "Pluginy",
     version: "0.5.0",
     description: "Sklep pluginow",
