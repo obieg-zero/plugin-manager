@@ -225,12 +225,15 @@ const plugin = ({ React, ui, icons, store, sdk }) => {
       myPlugins.length > 0 && /* @__PURE__ */ jsx(ui.Card, { title: "Zainstalowane pluginy", children: /* @__PURE__ */ jsx(ui.Stack, { children: myPlugins.map((p) => {
         const isGh = p.spec.includes("/") && !p.spec.startsWith("store://");
         const currentRef = p.spec.split("@")[1] ?? "main";
+        const pluginDef = plugins.find((pl) => p.label === pl.label || p.spec.includes(pl.id));
+        const ver = pluginDef == null ? void 0 : pluginDef.version;
+        const detail = [ver && `v${ver}`, isGh && currentRef].filter(Boolean).join(" · ");
         return /* @__PURE__ */ jsxs(React.Fragment, { children: [
           /* @__PURE__ */ jsx(
             ui.ListItem,
             {
               label: p.label,
-              detail: isGh ? currentRef : void 0,
+              detail: detail || void 0,
               action: /* @__PURE__ */ jsxs(ui.Row, { children: [
                 isGh && /* @__PURE__ */ jsx(ui.Button, { size: "xs", outline: true, onClick: () => versionSpec === p.spec ? setVersionSpec(null) : fetchVersions(p.spec), children: "Zmien wersje" }),
                 /* @__PURE__ */ jsx(ui.Button, { color: "error", size: "xs", outline: true, onClick: () => uninstallSpec(p.spec), children: "Odinstaluj" })
